@@ -32,6 +32,14 @@ export DOTNET_ROOT="$DOTNET_ROOT_DIR"
 fail(){ echo "❌ $1" >&2; exit 1; }
 ok(){ echo "✅ $1"; }
 step(){ echo; echo "▶ $1"; }
+preserve_export_preset(){
+  cp "$EXPORT_DIR/export_presets.cfg" "$WORK/export_presets.saved.cfg" || fail "备份导出预设失败"
+  trap 'cp "$WORK/export_presets.saved.cfg" "$EXPORT_DIR/export_presets.cfg"' EXIT
+}
+restore_export_preset(){
+  cp "$WORK/export_presets.saved.cfg" "$EXPORT_DIR/export_presets.cfg" || fail "还原导出预设失败"
+  trap - EXIT
+}
 
 step "0/6 前置检查"
 [ -x "$GODOT" ] || fail "Godot 引擎缺失: $GODOT（在 config.sh 里 STS2_GODOT_BIN 指向 Godot 4.5.1 mono 可执行）"
@@ -46,11 +54,15 @@ ok "前置齐全"
 
 step "1/6 重新织入最新 sts2.dll（补丁 + 游戏原始程序集）"
 cd "$ROOT" || fail "cd 失败"
-cp "$GAME_DATA/sts2.dll" "$WORK/sts2.dll" || fail "拷贝游戏 sts2.dll 失败"
+# 补丁项目从被忽略的 game-refs/ 引用用户当前游戏程序集；首次克隆也需自动备齐。
+mkdir -p "$ROOT/game-refs" || fail "创建 game-refs 失败"
+cp "$GAME_DATA/sts2.dll" "$GAME_DATA/GodotSharp.dll" "$ROOT/game-refs/" \
+  || fail "拷贝游戏编译引用失败"
 dotnet build src/STS2MobileIos -c Release -o "$WORK/mobilepatch-out" >"$WORK/patch-build.log" 2>&1 \
   || fail "补丁库编译失败，见 $WORK/patch-build.log"
+# Weaver 只读原始程序集，以便在同目录解析 Sentry 等依赖；织入产物始终写入 .work/。
 dotnet run --project src/STS2Weaver -c Release -- \
-  "$WORK/sts2.dll" "$WORK/mobilepatch-out/STS2MobileIos.dll" \
+  "$GAME_DATA/sts2.dll" "$WORK/mobilepatch-out/STS2MobileIos.dll" \
   src/STS2MobileIos/manifest.json "$WOVEN" 2>&1 | tee "$WORK/weave.log" | grep -E "\[FAIL\]|完成"
 grep -q "完成" "$WORK/weave.log" || fail "织入失败，见 $WORK/weave.log"
 ok "织入完成: $WOVEN"
@@ -83,6 +95,54 @@ cp -R "$STS2_IOS_LIBS_DIR/libGodotFmod.ios.template_release.xcframework" "$ADDON
 cp "$STS2_FMOD_STATIC_DIR/"libfmod{,studio}_iphoneos.a "$ADDONS/fmod/libs/ios/" 2>/dev/null
 ok "GDExtension 库就位"
 
+step "3.5/6 备齐导出描述文件与编辑器资源（只从用户游戏提取，均在忽略目录）"
+PYTHONDONTWRITEBYTECODE=1 python3 - "$ROOT" "$GAME" "$EXPORT_DIR" >"$WORK/export-resources.log" 2>&1 <<'PY' \
+  || fail "导出资源准备失败，见 $WORK/export-resources.log"
+from pathlib import Path
+import sys
+
+root, game, export = map(Path, sys.argv[1:])
+sys.path.insert(0, str(root / "tools"))
+from pck_ls import read_dir
+
+# 描述文件才会触发 Godot 的库收集与静态入口注册；仅复制 framework 不够。
+required = {
+    "addons/fmod/fmod.gdextension",
+    "addons/spine/spine_godot_extension.gdextension",
+}
+with (game / "Slay the Spire 2.pck").open("rb") as pack:
+    for name, offset, size, flags in read_dir(pack):
+        name = name.removeprefix("res://")
+        if name not in required:
+            continue
+        if flags & 1:
+            raise RuntimeError(f"导出资源已加密: {name}")
+        target = export / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        pack.seek(offset)
+        target.write_bytes(pack.read(size))
+        required.remove(name)
+    if required:
+        raise RuntimeError(f"游戏缺少导出资源: {sorted(required)}")
+
+print("已从用户游戏提取原始 FMOD/Spine 描述文件")
+PY
+mkdir -p "$ADDONS/export-shell"
+sips -s format png "$GAME/icon.icns" --out "$ADDONS/export-shell/icon.png" \
+  >>"$WORK/export-resources.log" 2>&1 || fail "游戏图标转换失败，见 $WORK/export-resources.log"
+# recovery-mode 不加载桌面扩展，避免发行库的编辑器文档生成崩溃；资源扫描与导出仍正常。
+preserve_export_preset
+"$GODOT" --headless --editor --recovery-mode --path "$EXPORT_DIR" --import \
+  >"$WORK/import.log" 2>&1
+IMPORT_RC=$?
+restore_export_preset
+[ "$IMPORT_RC" = "0" ] || fail "Godot 资源导入失败，见 $WORK/import.log"
+for extension in "res://addons/fmod/fmod.gdextension" "res://addons/spine/spine_godot_extension.gdextension"; do
+  grep -Fxq "$extension" "$EXPORT_DIR/.godot/extension_list.cfg" \
+    || fail "Godot 未发现扩展 $extension，见 $WORK/import.log"
+done
+ok "导出描述文件、图标和扩展发现已就绪"
+
 step "4/6 dotnet publish（NativeAOT 预编译织入程序集 → sts2.framework）"
 cd "$EXPORT_DIR" || fail "cd 失败"
 dotnet publish sts2.csproj -c ExportRelease -r ios-arm64 \
@@ -98,16 +158,38 @@ ok "sts2.framework 预编译完成: $(du -h "$PUB_DIR/sts2.dylib" | cut -f1) arm
 
 step "5/6 Godot 导出 iOS 工程"
 mkdir -p "$EXPORT_DIR/build"
+# 个人配置只写入忽略目录。导出阶段只生成工程，以 ad-hoc 身份处理可能存在的 dylib；
+# 真正的 Apple Development 签名在生成工程后交给 Xcode 完成。
+python3 - "$EXPORT_DIR/.godot/export_credentials.cfg" "$STS2_TEAM_ID" "$STS2_BUNDLE_ID" <<'PY' \
+  || fail "写入本地导出凭据失败"
+from pathlib import Path
+import json
+import sys
+path = Path(sys.argv[1])
+path.parent.mkdir(parents=True, exist_ok=True)
+path.write_text('[preset.0.options]\n'
+                'application/app_store_team_id=' + json.dumps(sys.argv[2]) + '\n'
+                'application/bundle_identifier=' + json.dumps(sys.argv[3]) + '\n'
+                'application/export_project_only=true\n'
+                'application/code_sign_identity_debug="-"\n'
+                'application/code_sign_identity_release="-"\n')
+path.chmod(0o600)
+PY
 # 导出 Xcode 工程（--main-pack 是运行时参数不是导出参数,不能放这里;
 # 游戏内容通过 step 5.5 替换 pck 进入应用包）
-"$GODOT" --headless --path "$EXPORT_DIR" \
+preserve_export_preset
+"$GODOT" --headless --recovery-mode --path "$EXPORT_DIR" \
   --export-release "iOS" "$EXPORT_DIR/build/StS2.ipa" 2>&1 | tee "$WORK/export.log" | tail -8
+EXPORT_RC=${PIPESTATUS[0]}
+restore_export_preset
+[ "$EXPORT_RC" = "0" ] || fail "Godot 导出失败(退出码 $EXPORT_RC)，见 $WORK/export.log"
 [ -d "$EXPORT_DIR/build/StS2.xcodeproj" ] || fail "Godot 未生成 Xcode 工程，见 $WORK/export.log"
 ok "Xcode 工程已生成"
 
 step "5.15/6 修 pbxproj 签名（Godot 每次导出重生成工程: Distribution→Development + 钉死团队）"
 PBX="$EXPORT_DIR/build/StS2.xcodeproj/project.pbxproj"
 sed -i '' 's/Apple Distribution/Apple Development/g' "$PBX"
+sed -i '' -E 's/(CODE_SIGN_IDENTITY(\[[^]]*\])?"? = )[^;]*;/\1"Apple Development";/g' "$PBX"
 sed -i '' "s/DEVELOPMENT_TEAM = [^;]*;/DEVELOPMENT_TEAM = ${STS2_TEAM_ID};/g" "$PBX"
 # bundle id 从 config 钉进工程（否则用的是 export_presets.cfg 里的占位 com.yourname.sts2，
 # 会与 config 的 STS2_BUNDLE_ID 不符，导致 push-pck/存档脚本对错容器）

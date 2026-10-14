@@ -16,7 +16,7 @@ source "$SCRIPT_DIR/config.sh"
 DEV="$STS2_DEVICE_UDID"
 IDENT="$STS2_SIGN_IDENTITY"
 # 已构建的 .app（DerivedData 里的哈希目录不固定；Xcode Run 默认 Debug，也可能 Release，两者都收，取最新）
-APP=$(find "$HOME/Library/Developer/Xcode/DerivedData" -maxdepth 4 -type d -path "*-iphoneos/StS2.app" 2>/dev/null \
+APP=$(find "$HOME/Library/Developer/Xcode/DerivedData" -maxdepth 5 -type d -path "*-iphoneos/StS2.app" 2>/dev/null \
       | xargs -I{} stat -f '%m %N' {} 2>/dev/null | sort -rn | head -1 | cut -d' ' -f2-)
 PUB="$SCRIPT_DIR/.godot/mono/temp/bin/ExportRelease/ios-arm64/publish/sts2.dylib"
 STG="$(mktemp -d /tmp/sts2slim.XXXXXX)/StS2.app"
@@ -28,6 +28,8 @@ fail(){ echo "❌ $1"; exit 1; }
 [ -f "$ENT" ] || fail "entitlements 不存在: $ENT（先跑 build-ios.sh 生成）"
 # 1) 换新织入 dylib 进 .app
 cp "$PUB" "$APP/Frameworks/sts2.framework/sts2" || fail "换 dylib 失败"
+install_name_tool -id '@rpath/sts2.framework/sts2' "$APP/Frameworks/sts2.framework/sts2" \
+  || fail "修正 sts2.framework 动态库标识失败"
 echo "✅ 新 dylib 已换入 ($(shasum "$PUB" | cut -c1-12))"
 # 2) 造瘦身包
 mkdir -p "$(dirname "$STG")"; cp -R "$APP" "$STG"
@@ -50,9 +52,15 @@ echo "$INSTALL_OUT" | grep -iE "installationURL|error" | head -3
 [ "$RC" = "0" ] || fail "装机失败(退出码 $RC)"
 echo "$INSTALL_OUT" | grep -q "installationURL" || fail "装机输出异常(无 installationURL)"
 # 装完核验文档区 pck 是否仍在(升级安装应保留; 若被当新装会清空)
-if ! xcrun devicectl device info files --device "$DEV" \
-     --domain-type appDataContainer --domain-identifier "$STS2_BUNDLE_ID" 2>/dev/null \
-     | grep -q "Documents/StS2.pck"; then
+# 先收完整输出，避免 grep -q 提前退出使上游 SIGPIPE 被 pipefail 误判成查询失败。
+FILES_OUT=$(xcrun devicectl device info files --device "$DEV" \
+     --domain-type appDataContainer --domain-identifier "$STS2_BUNDLE_ID" 2>&1)
+FILES_RC=$?
+if [ "$FILES_RC" != "0" ]; then
+  printf '%s\n' "$FILES_OUT" >&2
+  fail "安装已完成，但文档区查询失败(退出码 $FILES_RC)，无法确认素材包状态"
+fi
+if ! grep -Fq "Documents/StS2.pck" <<< "$FILES_OUT"; then
   echo "⚠️ 警告: 容器里没有 Documents/StS2.pck(可能被当新装清空), 需重推 pck!"
 fi
 echo "✅ 装机完成"

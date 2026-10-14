@@ -40,9 +40,15 @@ if ! xcrun devicectl device copy to --device "$DEV" \
 fi
 
 # 校验: 文档区确实出现 StS2.pck（别只信退出码，实测过“装/拷成功仍没落地”的坑）
-if xcrun devicectl device info files --device "$DEV" \
-     --domain-type appDataContainer --domain-identifier "$BUNDLE" 2>/dev/null \
-     | grep -q "Documents/StS2.pck"; then
+# 先收完整输出再匹配，避免 grep -q 提前退出令 devicectl 收到 SIGPIPE，误判校验失败。
+FILES_OUT=$(xcrun devicectl device info files --device "$DEV" \
+     --domain-type appDataContainer --domain-identifier "$BUNDLE" 2>&1)
+FILES_RC=$?
+if [ "$FILES_RC" != "0" ]; then
+  printf '%s\n' "$FILES_OUT" >&2
+  fail "推送后文档区查询失败(退出码 $FILES_RC)，无法确认素材包状态"
+fi
+if grep -Fq "Documents/StS2.pck" <<< "$FILES_OUT"; then
   echo "✅ 素材包已就位: $BUNDLE : Documents/StS2.pck"
   echo "   现在启动 App 应能从 user://StS2.pck 加载游戏内容(引擎经 Info.plist godot_cmdline 读取)。"
 else

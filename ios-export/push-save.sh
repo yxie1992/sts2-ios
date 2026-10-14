@@ -44,9 +44,15 @@ xcrun devicectl device copy to --device "$DEV" \
   || { cat /tmp/pushsave.err >&2; fail "推送失败(设备不可达/锁屏/bundle 错/App 没装？)"; }
 
 # 校验收件箱确实落地
-if xcrun devicectl device info files --device "$DEV" \
-     --domain-type appDataContainer --domain-identifier "$BUNDLE" 2>/dev/null \
-     | grep -q "sync_inbox/$D"; then
+# 先收完整输出再匹配，避免 grep -q 提前退出令 devicectl 收到 SIGPIPE，误判校验失败。
+FILES_OUT=$(xcrun devicectl device info files --device "$DEV" \
+     --domain-type appDataContainer --domain-identifier "$BUNDLE" 2>&1)
+FILES_RC=$?
+if [ "$FILES_RC" != "0" ]; then
+  printf '%s\n' "$FILES_OUT" >&2
+  fail "推送后文档区查询失败(退出码 $FILES_RC)，无法确认收件箱状态"
+fi
+if grep -Fq "sync_inbox/$D" <<< "$FILES_OUT"; then
   echo "✅ 已推入收件箱。现在【启动游戏】，进度会被 SyncImportPatch 自动导入。"
   echo "   导入后手机原有存档(若有)会留时间戳备份，可在容器 sync_replaced_* 里找到。"
 else
