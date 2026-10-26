@@ -26,6 +26,17 @@
     <PrebuiltDir>$(MSBuildProjectDirectory)/prebuilt</PrebuiltDir>
   </PropertyGroup>
 
+  <!-- Optional LLVM Mach-O linker for the larger solver build. Xcode 27's
+       linker hits dotnet/runtime#119380 on this NativeAOT object. -->
+  <PropertyGroup Condition="'$(STS2_IOS_LINKER)' != ''">
+    <UseLdClassicXCodeLinker>false</UseLdClassicXCodeLinker>
+  </PropertyGroup>
+  <ItemGroup Condition="'$(STS2_IOS_LINKER)' != ''">
+    <LinkerArg Include="-fuse-ld=lld" />
+    <LinkerArg Include="--ld-path=&quot;$(STS2_IOS_LINKER)&quot;" />
+    <LinkerArg Include="-Wl,--threads=1" />
+  </ItemGroup>
+
   <!-- 所有游戏依赖程序集作为引用，供 ILC 解析织入 sts2.dll 的引用 -->
   <ItemGroup>
     <Reference Include="$(PrebuiltDir)/deps/*.dll">

@@ -51,6 +51,6 @@ internal static class MobileSearchPolicy
         catch (DllNotFoundException) { return null; }
     }
 
-    [DllImport("__Internal", EntryPoint = "os_proc_available_memory")]
+    [DllImport("/usr/lib/libSystem.B.dylib", EntryPoint = "os_proc_available_memory")]
     private static extern ulong OsProcAvailableMemory();
 }

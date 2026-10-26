@@ -30,6 +30,8 @@ STS2_GODOT_BIN="$HOME/Godot_mono.app/Contents/MacOS/Godot"
 STS2_DOTNET_ROOT="$HOME/.dotnet"
 # 可选：明确指定此 checkout 的已签名基座，避免自动选中另一工作树的最新 .app。
 # STS2_BASE_APP="/absolute/path/to/DerivedData/Build/Products/Release-iphoneos/StS2.app"
+# 可选：CombatSolver 使用 LLVM Mach-O linker（brew install lld）。默认从 PATH 查找。
+# STS2_IOS_LINKER="/opt/homebrew/opt/lld/bin/ld64.lld"
 
 # ── 第三方 iOS 库（官方地址+确切版本见 docs/THIRD_PARTY_LIBS.md；本仓库不转发）──
 # 目录里需含: libspine_godot.ios.template_release.framework   (Spine 4.2 / Godot 4.5.1)

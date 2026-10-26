@@ -12,10 +12,11 @@ records (99 strict and 303 general recipes), 283 concrete power types, and 394
 private-member accesses through 155 bridges. Unknown behavior is rejected.
 The runtime game retains its original member visibility.
 
-An isolated ordinary .NET harness passed 17 checks, including a cloned card
+An isolated ordinary .NET harness passed 26 checks, including a cloned card
 upgrade, unchanged live state and RNG, deterministic search, cancellation,
 actual two-worker expansion, upstream preset equality, generated JSON round-trip
-and custom-option propagation.
+and custom-option propagation. Expanded checks cover same-count and empty-list
+mutation rejection, exact upstream JSON bytes, and sparse settings defaults.
 For one fixed starter-deck combat, the adapted and installed desktop solvers
 produced identical serialized actions, node counts, boundary and HP prediction.
 That fixture is a smoke test, not broad prediction coverage or a speed benchmark.
@@ -31,6 +32,9 @@ Use a separate checkout/worktree and its own ignored `ios-export/config.sh`.
 Follow the normal dependency instructions in `AGENTS.md`. This variant also
 requires the exact beta game and installed Workshop versions pinned in
 `src/CombatSolverIos/upstream.json`; an unexpected update fails validation.
+Install LLVM's Mach-O linker with `brew install lld`; the solver build locates
+`ld64.lld` on PATH, or accepts `STS2_IOS_LINKER` in local config. The original
+non-solver build retains its existing linker choice.
 
 ```sh
 bash ios-export/build-combat-solver.sh
@@ -47,10 +51,18 @@ memory and disk bandwidth.
 
 The pipeline generates static clone/access bridges, card recipes and power
 dispatch; compiles the isolated project; rewrites private accesses; applies the
-37 mobile hooks and three solver hooks; then runs NativeAOT and Godot export.
+37 mobile hooks and four solver hooks; then runs NativeAOT and Godot export.
 It also handles the beta's renamed Sentry autoload and excludes its audited
 Sentry module initializer. The DLL and asset pack must come from the same pin.
 Generated recipes and proprietary game files are never committed.
+
+The first combined NativeAOT compilation generated an arm64 object, but Xcode
+27's linker crashed with `too many large addends`. Retrying its default linker
+also failed. LLVM LLD 23.1.3 linked the same object successfully in an isolated
+probe. The build now selects LLD for this opt-in variant and limits linking to
+one thread. This matches the failure tracked in
+[dotnet/runtime#119380](https://github.com/dotnet/runtime/issues/119380);
+[LLVM documents the supported Mach-O linker flags](https://lld.llvm.org/MachO/index.html).
 
 ## Settings
 

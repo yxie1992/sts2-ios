@@ -59,15 +59,23 @@ restore_export_preset(){
 }
 
 step "0/6 前置检查"
-[ -x "$GODOT" ] || fail "Godot 引擎缺失: $GODOT（在 config.sh 里 STS2_GODOT_BIN 指向 Godot 4.5.1 mono 可执行）"
+[ -x "$GODOT" ] || fail "Godot 引擎缺失: ${GODOT}（在 config.sh 里 STS2_GODOT_BIN 指向 Godot 4.5.1 mono 可执行）"
 command -v dotnet >/dev/null || fail "dotnet 不在 PATH（装 .NET 9 SDK）"
 [ -d "$GAME_DATA" ] || fail "游戏数据目录缺失（Steam 游戏没装或路径不对）: $GAME_DATA"
 TEMPLATES="$HOME/Library/Application Support/Godot/export_templates/4.5.1.stable.mono"
-[ -d "$TEMPLATES" ] || fail "iOS 导出模板未安装到 $TEMPLATES（Godot 里先 import templates.tpz）"
-[ -d "$STS2_IOS_LIBS_DIR/libspine_godot.ios.template_release.framework" ] || fail "Spine iOS 库缺失于 $STS2_IOS_LIBS_DIR（自备，见 README）"
-[ -d "$STS2_IOS_LIBS_DIR/libGodotFmod.ios.template_release.xcframework" ] || fail "FMOD iOS 库缺失于 $STS2_IOS_LIBS_DIR（自备）"
-[ -f "$STS2_FMOD_STATIC_DIR/libfmod_iphoneos.a" ] || fail "FMOD 静态库缺失于 $STS2_FMOD_STATIC_DIR（自备）"
+[ -d "$TEMPLATES" ] || fail "iOS 导出模板未安装到 ${TEMPLATES}（Godot 里先 import templates.tpz）"
+[ -d "$STS2_IOS_LIBS_DIR/libspine_godot.ios.template_release.framework" ] || fail "Spine iOS 库缺失于 ${STS2_IOS_LIBS_DIR}（自备，见 README）"
+[ -d "$STS2_IOS_LIBS_DIR/libGodotFmod.ios.template_release.xcframework" ] || fail "FMOD iOS 库缺失于 ${STS2_IOS_LIBS_DIR}（自备）"
+[ -f "$STS2_FMOD_STATIC_DIR/libfmod_iphoneos.a" ] || fail "FMOD 静态库缺失于 ${STS2_FMOD_STATIC_DIR}（自备）"
 ok "前置齐全"
+if [ "${STS2_ENABLE_COMBAT_SOLVER:-0}" = "1" ]; then
+  # Xcode 27's Apple linker asserts on the combined solver NativeAOT object.
+  # Keep the workaround opt-in; normal builds retain the SDK's linker choice.
+  STS2_IOS_LINKER="${STS2_IOS_LINKER:-$(command -v ld64.lld || true)}"
+  [ -n "$STS2_IOS_LINKER" ] && [ -x "$STS2_IOS_LINKER" ] \
+    || fail "CombatSolver requires LLVM ld64.lld (brew install lld), or set STS2_IOS_LINKER in config.sh"
+  export STS2_IOS_LINKER
+fi
 
 step "1/6 重新织入最新 sts2.dll（补丁 + 游戏原始程序集）"
 cd "$ROOT" || fail "cd 失败"
@@ -183,7 +191,7 @@ restore_export_preset
 [ "$IMPORT_RC" = "0" ] || fail "Godot 资源导入失败，见 $WORK/import.log"
 for extension in "res://addons/fmod/fmod.gdextension" "res://addons/spine/spine_godot_extension.gdextension"; do
   grep -Fxq "$extension" "$EXPORT_DIR/.godot/extension_list.cfg" \
-    || fail "Godot 未发现扩展 $extension，见 $WORK/import.log"
+    || fail "Godot 未发现扩展 ${extension}，见 $WORK/import.log"
 done
 ok "导出描述文件、图标和扩展发现已就绪"
 
@@ -195,7 +203,7 @@ dotnet publish sts2.csproj -c ExportRelease -r ios-arm64 \
 # 用真实退出码 + 产物存在判成败（publish.log 里有海量 IL 裁剪 warning，文本含 "error" 子串，不能靠 grep）
 PUBRC=${PIPESTATUS[0]}
 PUB_DIR="$EXPORT_DIR/.godot/mono/temp/bin/ExportRelease/ios-arm64/publish"
-[ "$PUBRC" = "0" ] || fail "dotnet publish 退出码 $PUBRC，见 $WORK/publish.log"
+[ "$PUBRC" = "0" ] || fail "dotnet publish 退出码 ${PUBRC}，见 $WORK/publish.log"
 [ -f "$PUB_DIR/sts2.dylib" ] || fail "NativeAOT 未产出 sts2.dylib，见 $WORK/publish.log"
 file "$PUB_DIR/sts2.dylib" | grep -q "arm64" || fail "sts2.dylib 不是 arm64"
 ok "sts2.framework 预编译完成: $(du -h "$PUB_DIR/sts2.dylib" | cut -f1) arm64 原生库"

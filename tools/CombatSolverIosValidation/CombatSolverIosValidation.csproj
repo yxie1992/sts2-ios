@@ -13,7 +13,7 @@
     <UpstreamHarness>$(WorkDir)/source/CombatSolver/tools/search/OfflineSearchHarness</UpstreamHarness>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="Program.cs;AssemblyBootstrap.cs;AccessChecks.cs" />
+    <Compile Include="Program.cs;AssemblyBootstrap.cs;AccessChecks.cs;JsonParityChecks.cs" />
     <Compile Include="$(UpstreamHarness)/GameBootstrap.cs;$(UpstreamHarness)/OfflineCombat.cs;$(UpstreamHarness)/MemorySaveStore.cs;$(UpstreamHarness)/OfflineLocalization.cs;$(UpstreamHarness)/MainLoopContext.cs" />
     <Reference Include="sts2" HintPath="$(WorkDir)/bridged/sts2.dll" Private="false" />
     <Reference Include="GodotSharp" HintPath="$(WorkDir)/game/data_sts2_macos_arm64/GodotSharp.dll" Private="false" />

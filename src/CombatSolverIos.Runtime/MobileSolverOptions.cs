@@ -6,15 +6,16 @@ namespace CombatSolver.Mobile;
 
 internal enum MobilePreset { Mobile, Low, Medium, High, VeryHigh, Custom }
 
-internal sealed record MobileSolverOptions
+// Explicit optional constructor values are preserved by source-generated JSON.
+// Init-property initializers alone are lost for omitted JSON properties in .NET 9.
+internal sealed record MobileSolverOptions(
+    MobilePreset Preset = MobilePreset.Mobile,
+    int Seconds = 5,
+    int Nodes = 3_000,
+    int BeamWidth = 16,
+    int Workers = 1,
+    SolverPotionPolicy Potions = SolverPotionPolicy.Disabled)
 {
-    public MobilePreset Preset { get; init; } = MobilePreset.Mobile;
-    public int Seconds { get; init; } = 5;
-    public int Nodes { get; init; } = 3_000;
-    public int BeamWidth { get; init; } = 16;
-    public int Workers { get; init; } = 1;
-    public SolverPotionPolicy Potions { get; init; } = SolverPotionPolicy.Disabled;
-
     internal static int MaximumWorkers => Math.Clamp(System.Environment.ProcessorCount, 1, 16);
 
     internal MobileSolverOptions Validated() => this with

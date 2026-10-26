@@ -5,12 +5,14 @@ not a separate Godot script assembly. `Entry.Mobile.cs` replaces the upstream
 desktop initializer. The original solver engine still performs the search.
 
 Apply `manifest.json` to the already mobile-patched **0.111.0** game assembly
-using `CombatSolver.dll` as the hook assembly. All three hooks are required:
+using `CombatSolver.dll` as the hook assembly. All four hooks are required:
 
 - `NGame._Ready`: adds the touch UI using built-in nodes and signal delegates.
 - `CombatStateTracker.NotifyCombatStateChanged`: suppresses simulated UI state
   notifications and invalidates displayed results after live changes.
 - `PowerModel.DynamicVars`: rejects lazy display-variable creation in simulation.
+- `NBackgroundModeHandler.EnterBackgroundMode`: cancels search before the
+  lifecycle patch pauses the scene tree.
 
 The adapter never calls desktop `Entry.Initialize`, Ritsu initialization, a
 runtime patcher, an auto-player, a child process, or a network uploader. It does
@@ -42,7 +44,9 @@ The engine gets an explicit fixed budget and normal GC; the adapter never enters
 a no-GC region. A cancellation backstop is set ten seconds beyond the selected budget.
 
 On iOS, admission requires at least 512 MiB reported by
-`os_proc_available_memory()`. The polling loop cancels below 256 MiB remaining,
+`os_proc_available_memory()` from `/usr/lib/libSystem.B.dylib`. Admission fails
+with an explicit status if the native memory measurement is unavailable. The
+polling loop cancels if measurement becomes unavailable, below 256 MiB remaining,
 or after managed heap growth exceeds 384 MiB. These are cooperative samples,
 not a hard process memory cap; an allocation burst can outrun them. A native
 symbol/link check and real-device memory test remain necessary.
@@ -56,10 +60,12 @@ the worker-only dynamic-variable guard. Search has a thread-local simulation
 isolation scope and no route execution code.
 
 The adapter checks both notification revision and full `LiveCombatStamp` before
-publishing results. It cancels on combat/turn/action changes, focus loss, user
+publishing results. It cancels on combat/turn/action changes, a paused scene tree,
+app backgrounding, focus loss, user
 cancellation, memory pressure or timeout. No new search is admitted until the
 previous session has completed. Results are cleared after live state changes. The
-polling implementation avoids Task-return postfixes for combat-end lifecycle.
+polling timer processes even while the scene tree is paused so cancellation can
+drain. The implementation avoids Task-return postfixes for combat-end lifecycle.
 
 Unsupported intents, uncompensated prediction gaps and unsupported-effect or
 dynamic-resolution boundaries produce an explicit refusal, not recommendations.

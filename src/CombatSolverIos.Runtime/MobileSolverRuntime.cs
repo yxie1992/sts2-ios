@@ -81,6 +81,7 @@ public static class MobileSolverRuntime
             {
                 Name = "CombatSolverMobileTimer", WaitTime = 0.2,
                 OneShot = false, IgnoreTimeScale = true,
+                ProcessMode = Node.ProcessModeEnum.Always,
             };
             _layer!.AddChild(_timer);
             _timer.Timeout += Tick;
@@ -100,6 +101,10 @@ public static class MobileSolverRuntime
         Interlocked.Increment(ref _liveRevision);
         return true;
     }
+
+    /// <summary>Cancel before the mobile lifecycle patch pauses the scene tree.</summary>
+    public static void BackgroundPrefix()
+        => StopSearch("Search cancelled when the app entered background.");
 
     /// <summary>Same safety contract as the desktop materialization guard, without FieldRefAccess/Emit.</summary>
     public static void PowerDynamicVarsPrefix(PowerModel __instance)
@@ -209,6 +214,8 @@ public static class MobileSolverRuntime
 
     private static bool TryPlayableState(out CombatState? state)
     {
+        state = null;
+        if (IsValid(_tree) && _tree!.Paused) return false;
         state = CombatManager.Instance.DebugOnlyGetState();
         return CombatManager.Instance.IsInProgress && state is { Players.Count: 1 }
             && !RunManager.Instance.NetService.Type.IsMultiplayer()
@@ -231,7 +238,13 @@ public static class MobileSolverRuntime
             SetText("Wait for your turn and finish any pending card choice or animation.");
             return;
         }
-        if (MobileSearchPolicy.AvailableMemory() is ulong memory && memory < MobileSearchPolicy.AdmissionHeadroom)
+        ulong? availableMemory = MobileSearchPolicy.AvailableMemory();
+        if (OperatingSystem.IsIOS() && availableMemory == null)
+        {
+            SetText("Search unavailable: iOS app memory could not be measured safely.");
+            return;
+        }
+        if (availableMemory is ulong memory && memory < MobileSearchPolicy.AdmissionHeadroom)
         {
             SetText("Not enough available app memory to start a search safely. Try again later.");
             return;
@@ -332,12 +345,15 @@ public static class MobileSolverRuntime
                 }
                 return;
             }
+            ulong? availableMemory = MobileSearchPolicy.AvailableMemory();
             if (!playable || !ReferenceEquals(current, session.State))
                 StopSearch("Combat changed. Search again when ready.");
             else if (!session.Cancellation.IsCancellationRequested && LiveCombatStamp.Capture(current!) != session.Stamp)
                 StopSearch("Combat changed. Search again when ready.");
+            else if (OperatingSystem.IsIOS() && availableMemory == null)
+                StopSearch("Search stopped: iOS app memory could no longer be measured safely.");
             else if (GC.GetTotalMemory(false) - session.ManagedBytesAtStart > MobileSearchPolicy.ManagedGrowthLimit
-                || MobileSearchPolicy.AvailableMemory() is ulong remaining && remaining < MobileSearchPolicy.StopHeadroom)
+                || availableMemory is ulong remaining && remaining < MobileSearchPolicy.StopHeadroom)
                 StopSearch("Search stopped to preserve memory. Try again after this action.");
 
             if (session.Worker is not { IsCompleted: true } completed)

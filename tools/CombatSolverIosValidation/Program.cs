@@ -113,11 +113,18 @@ internal static class Program
             string serialized = JsonSerializer.Serialize(custom, MobileOptionsJsonContext.Default.MobileSolverOptions);
             Require(JsonSerializer.Deserialize(serialized, MobileOptionsJsonContext.Default.MobileSolverOptions) == custom,
                 "mobile options round-trip through generated JSON metadata", checks);
+            Require(JsonSerializer.Deserialize("{}", MobileOptionsJsonContext.Default.MobileSolverOptions)
+                == new MobileSolverOptions()
+                && JsonSerializer.Deserialize("{\"Seconds\":17}", MobileOptionsJsonContext.Default.MobileSolverOptions)
+                == new MobileSolverOptions { Seconds = 17 },
+                "omitted mobile JSON options retain their declared defaults", checks);
             SearchPolicySnapshot customPolicy = MobileSearchPolicy.Create(new SearchFramePressureSignal(), custom);
             Require(customPolicy.Profile.SoftTimeBudgetMilliseconds == 27_000
                 && customPolicy.Profile.MaxExpandedNodes == 12_000 && customPolicy.Profile.BeamWidth == 37
                 && customPolicy.MaxDegreeOfParallelism == 2 && customPolicy.PotionPolicy == SolverPotionPolicy.Smart,
                 "custom mobile settings reach immutable search policy", checks);
+            CheckCollectionGuard(checks);
+            JsonParityChecks.Run(checks);
 #endif
             using (var cancelled = new CancellationTokenSource())
             {
@@ -208,6 +215,48 @@ internal static class Program
 
     private static string Hash(string path) => Convert.ToHexString(
         System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(path))).ToLowerInvariant();
+
+#if !DESKTOP_ORACLE
+    private static void CheckCollectionGuard(List<string> checks)
+    {
+        var unchanged = new List<int> { 1, 2, 3 };
+        var unchangedWindow = LiveCollectionGuard.BeginWindow(("unchanged", unchanged));
+        int[] snapshot = LiveCollectionGuard.SnapshotStable(unchanged, "unchanged");
+        unchangedWindow.Verify();
+        unchangedWindow.Verify();
+        Require(snapshot.SequenceEqual(unchanged),
+            "collection guard accepts unchanged lists and stable snapshots", checks);
+
+        bool Rejects(LiveCollectionGuard.Window window, string expectedName)
+        {
+            try { window.Verify(); }
+            catch (LiveCollectionModifiedException error) { return error.CollectionName == expectedName; }
+            return false;
+        }
+        var replaced = new List<int> { 1, 2 };
+        var replacedWindow = LiveCollectionGuard.BeginWindow(("replacement", replaced));
+        replaced[0] = 7;
+        Require(Rejects(replacedWindow, "replacement"),
+            "collection guard rejects same-count item replacement", checks);
+
+        var empty = new List<int>();
+        var emptyWindow = LiveCollectionGuard.BeginWindow(("empty", empty));
+        empty.Add(1);
+        empty.RemoveAt(0);
+        Require(Rejects(emptyWindow, "empty"),
+            "collection guard rejects add/remove on an initially empty list", checks);
+
+        var probed = new List<int> { 1, 2 };
+        try
+        {
+            LiveCollectionGuard.CaptureWindowProbeForTesting = () => probed[1] = 9;
+            var probeWindow = LiveCollectionGuard.BeginWindow(("capture probe", probed));
+            Require(Rejects(probeWindow, "capture probe"),
+                "collection guard rejects mutation inside its capture-window probe", checks);
+        }
+        finally { LiveCollectionGuard.CaptureWindowProbeForTesting = null; }
+    }
+#endif
 
     private static void Require(bool condition, string check, List<string> checks)
     {

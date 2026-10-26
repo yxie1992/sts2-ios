@@ -64,6 +64,22 @@ The mobile dependency adapters enforce the initial original-content scope:
 - Ritsu compatibility/shared assemblies remain real compile dependencies. Full
   desktop entry, Workshop integration and patch installation are not invoked.
 
+Search keys, settings, the diagnostic journal and replay evidence use generated
+System.Text.Json metadata from `Adapters/MobileSolverJson.cs`. Numeric-enum search
+keys keep the upstream default options; evidence keeps string enums and relaxed
+escaping; settings keep camel-case names, indentation, string enums and legacy
+read fields. These calls are evaluated even when a diagnostic sink is disabled,
+so omitting reflection metadata alone would break real searches on NativeAOT.
+`tools/patch-combat-solver-json.py` emits seven compiler overlays and a settings
+read DTO after checking each pinned file's SHA256 and exact replacement counts.
+The DTO preserves all 62 upstream default values and migration setters, then
+copies to the original immutable settings record. This avoids .NET 9 source
+generation overwriting omitted init-only properties with zero/null during sparse
+settings reads. The project excludes
+the originals and regenerates its owned `generated/Json/` files before compile;
+unexpected stale files are rejected. The isolated host harness compares all
+converted serialization shapes byte-for-byte against upstream reflection JSON.
+
 CombatSolver and RitsuLib are MIT-licensed. CombatSolver also carries required
 Random Foreseer attribution and permission notices. Preparation retains all of
 these, and this project copies them into its output `licenses/` directory.

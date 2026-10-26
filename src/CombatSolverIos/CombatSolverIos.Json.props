@@ -1,0 +1,13 @@
+<Project>
+  <ItemGroup>
+    <Compile Remove="$(CombatSolverSourceDir)/src/Search/CombatBeamSolver.Phases.cs;$(CombatSolverSourceDir)/src/Search/CombatBeamSolver.Expansion.Opening.cs;$(CombatSolverSourceDir)/src/Search/FrontierContinuationScheduler.cs;$(CombatSolverSourceDir)/src/Search/CombatBeamSolver.ExecutionChoiceContinuation.Testing.cs;$(CombatSolverSourceDir)/src/Search/SearchReplayEvidence.cs;$(CombatSolverSourceDir)/src/Runtime/CombatDiagnosticJournal.cs;$(CombatSolverSourceDir)/src/Runtime/SolverSettings.cs" />
+  </ItemGroup>
+  <Target Name="PrepareCombatSolverJsonOverlays" BeforeTargets="CoreCompile" DependsOnTargets="ValidateCombatSolverIosInputs">
+    <Exec Command="python3 &quot;$(MSBuildProjectDirectory)/../../tools/patch-combat-solver-json.py&quot;" />
+    <!-- On a clean build the wildcard is evaluated before these files exist. -->
+    <ItemGroup>
+      <Compile Remove="$(CombatSolverGeneratedDir)/Json/**/*.cs" />
+      <Compile Include="$(CombatSolverGeneratedDir)/Json/**/*.cs" />
+    </ItemGroup>
+  </Target>
+</Project>

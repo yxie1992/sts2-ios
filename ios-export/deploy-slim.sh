@@ -36,9 +36,9 @@ STG="$STAGE_DIR/StS2.app"
 ENT="$SCRIPT_DIR/.work/ent_mem.plist"
 fail(){ echo "❌ $1"; exit 1; }
 
-[ -f "$PUB" ] || fail "新 dylib 不存在: $PUB（先跑 build-ios.sh）"
+[ -f "$PUB" ] || fail "新 dylib 不存在: ${PUB}（先跑 build-ios.sh）"
 [ -n "$APP" ] && [ -d "$APP" ] || fail "DerivedData 里找不到已构建的 StS2.app（先用 Xcode GUI 完整构建一次）"
-[ -f "$ENT" ] || fail "entitlements 不存在: $ENT（先跑 build-ios.sh 生成）"
+[ -f "$ENT" ] || fail "entitlements 不存在: ${ENT}（先跑 build-ios.sh 生成）"
 # 1) 先复制基座再换 dylib，保留已验证的原始 .app。
 cp -R "$APP" "$STG" || fail "复制基座失败"
 BASE_BUNDLE=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$STG/Info.plist")
@@ -47,7 +47,7 @@ if [ -f "$SCRIPT_DIR/prebuilt/deps/CombatSolver.dll" ]; then
   PINNED_VERSION=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["game"]["version"])' \
     "$SCRIPT_DIR/../src/CombatSolverIos/upstream.json") || fail "读取 solver 版本失败"
   BASE_VERSION=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$STG/Info.plist")
-  [ "$BASE_VERSION" = "$PINNED_VERSION" ] || fail "CombatSolver 需要 $PINNED_VERSION 的新基座（当前 $BASE_VERSION）"
+  [ "$BASE_VERSION" = "$PINNED_VERSION" ] || fail "CombatSolver 需要 $PINNED_VERSION 的新基座（当前 ${BASE_VERSION}）"
   for notice in CombatSolver-LICENSE.txt CombatSolver-THIRD_PARTY_NOTICES.md RitsuLib-LICENSE.txt; do
     [ -s "$SCRIPT_DIR/prebuilt/licenses/$notice" ] || fail "缺少上游许可: $notice"
   done

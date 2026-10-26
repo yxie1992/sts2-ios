@@ -23,6 +23,14 @@
       "kind": "prefix",
       "hookType": "CombatSolver.Mobile.MobileSolverRuntime",
       "hookMethod": "PowerDynamicVarsPrefix"
+    },
+    {
+      "targetType": "MegaCrit.Sts2.Core.Nodes.NBackgroundModeHandler",
+      "targetMethod": "EnterBackgroundMode",
+      "targetParams": [],
+      "kind": "prefix",
+      "hookType": "CombatSolver.Mobile.MobileSolverRuntime",
+      "hookMethod": "BackgroundPrefix"
     }
   ]
 }

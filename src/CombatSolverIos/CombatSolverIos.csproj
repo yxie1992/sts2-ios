@@ -30,6 +30,7 @@
     <Compile Include="Adapters/**/*.cs" />
     <Compile Remove="$(CombatSolverSourceDir)/src/Runtime/ContinuationStamp.cs" />
     <Compile Remove="$(CombatSolverSourceDir)/src/Engine/InCombat/Simulation/CombatPredictionDynamicVarExtensions.cs" />
+    <Compile Remove="$(CombatSolverSourceDir)/src/Runtime/LiveCollectionGuard.cs" />
     <Compile Include="../CombatSolverIos.CoreOverrides/**/*.cs" Exclude="../CombatSolverIos.CoreOverrides/**/obj/**;../CombatSolverIos.CoreOverrides/**/bin/**" />
     <Compile Include="../CombatSolverIos.Runtime/**/*.cs" Exclude="../CombatSolverIos.Runtime/**/obj/**;../CombatSolverIos.Runtime/**/bin/**" />
     <Compile Include="$(CombatSolverGeneratedDir)/**/*.cs" />
@@ -55,4 +56,5 @@
     <Error Condition="!Exists('$(CombatSolverGeneratedDir)/CardOnPlayRecipes.g.cs')" Text="Missing static card recipes. Run CombatSolverAot recipes against the original copied beta references." />
     <Exec Command="python3 &quot;$(MSBuildProjectDirectory)/../../tools/prepare-combat-solver.py&quot; --verify" />
   </Target>
+  <Import Project="CombatSolverIos.Json.props" />
 </Project>

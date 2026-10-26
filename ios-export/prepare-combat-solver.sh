@@ -40,6 +40,7 @@ CORE="$ROOT/tools/CombatSolverAot/bin/Release/net9.0/CombatSolverAot.dll"
 "$DOTNET" "$ROOT/tools/CombatSolverDispatch/bin/Release/net9.0/CombatSolverDispatch.dll" \
   "$WORK/game/data_sts2_macos_arm64/sts2.dll" "$WORK/generated"
 python3 "$ROOT/tools/patch-combat-solver-source.py"
+python3 "$ROOT/tools/patch-combat-solver-json.py"
 "$DOTNET" build "$ROOT/src/CombatSolverIos" -c Release -m:1 --disable-build-servers -p:UseSharedCompilation=false
 "$DOTNET" "$CORE" rewrite "$ROOT/src/CombatSolverIos/bin/Release/net9.0/CombatSolver.dll" \
   "$WORK/bridged/runtime/sts2.dll" "$WORK/rewritten/CombatSolver.dll" "$WORK/rewritten/sts2.dll" \
