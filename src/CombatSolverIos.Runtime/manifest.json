@@ -1,0 +1,28 @@
+{
+  "patches": [
+    {
+      "targetType": "MegaCrit.Sts2.Core.Nodes.NGame",
+      "targetMethod": "_Ready",
+      "targetParams": [],
+      "kind": "postfix",
+      "hookType": "CombatSolver.Mobile.MobileSolverRuntime",
+      "hookMethod": "GameReadyPostfix"
+    },
+    {
+      "targetType": "MegaCrit.Sts2.Core.Combat.CombatStateTracker",
+      "targetMethod": "NotifyCombatStateChanged",
+      "targetParams": ["System.String"],
+      "kind": "prefix",
+      "hookType": "CombatSolver.Mobile.MobileSolverRuntime",
+      "hookMethod": "NotificationPrefix"
+    },
+    {
+      "targetType": "MegaCrit.Sts2.Core.Models.PowerModel",
+      "targetMethod": "get_DynamicVars",
+      "targetParams": [],
+      "kind": "prefix",
+      "hookType": "CombatSolver.Mobile.MobileSolverRuntime",
+      "hookMethod": "PowerDynamicVarsPrefix"
+    }
+  ]
+}

@@ -35,4 +35,6 @@ ios-export/.work/
 .DS_Store
 *.log
 *.pid
+__pycache__/
+*.py[cod]
 save_backups/

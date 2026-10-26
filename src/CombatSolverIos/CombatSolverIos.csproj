@@ -1,0 +1,58 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- This project deliberately does not import the upstream project or its
+       local.props: their default AfterBuild target deploys into Steam. -->
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <LangVersion>13.0</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <AssemblyName>CombatSolver</AssemblyName>
+    <RootNamespace>CombatSolver</RootNamespace>
+    <Version>0.50.1</Version>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <EnableDefaultNoneItems>false</EnableDefaultNoneItems>
+    <EnableDynamicLoading>false</EnableDynamicLoading>
+    <NoWarn>$(NoWarn);CS0436</NoWarn>
+    <CombatSolverWorkDir>$(MSBuildProjectDirectory)/../../ios-export/.work/solver-inputs</CombatSolverWorkDir>
+    <CombatSolverSourceDir>$(CombatSolverWorkDir)/source/CombatSolver</CombatSolverSourceDir>
+    <CombatSolverOriginalGameDir>$(CombatSolverWorkDir)/game/data_sts2_macos_arm64</CombatSolverOriginalGameDir>
+    <CombatSolverGameAssembly Condition="'$(CombatSolverGameAssembly)' == ''">$(CombatSolverWorkDir)/bridged/sts2.dll</CombatSolverGameAssembly>
+    <CombatSolverGeneratedDir>$(CombatSolverWorkDir)/generated</CombatSolverGeneratedDir>
+    <CombatSolverRitsuDir>$(CombatSolverWorkDir)/ritsu</CombatSolverRitsuDir>
+    <GodotProjectDir>$(CombatSolverSourceDir)/</GodotProjectDir>
+    <DefineConstants>$(DefineConstants);GODOT;GODOT_IOS;GODOT_MOBILE;COMBATSOLVER_IOS</DefineConstants>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="$(CombatSolverSourceDir)/src/**/*.cs"
+             Exclude="$(CombatSolverSourceDir)/src/Runtime/Entry.cs;$(CombatSolverSourceDir)/src/Engine/Common/PredictionUtils.cs;$(CombatSolverSourceDir)/src/Engine/InCombat/Mirrors/Cards/OnPlay/CardOnPlayInferrer.cs;$(CombatSolverSourceDir)/src/Engine/Common/NativeModelCloneConcurrency.cs;$(CombatSolverSourceDir)/src/Engine/Common/MirroredHookListenerFilter.cs;$(CombatSolverSourceDir)/src/Prediction/PredictionModPatchAudit.cs;$(CombatSolverSourceDir)/src/Prediction/PredictionModHookSubscriberCapture.cs;$(CombatSolverSourceDir)/src/Search/SimulatedCombatState.cs" />
+    <Compile Include="Adapters/**/*.cs" />
+    <Compile Remove="$(CombatSolverSourceDir)/src/Runtime/ContinuationStamp.cs" />
+    <Compile Remove="$(CombatSolverSourceDir)/src/Engine/InCombat/Simulation/CombatPredictionDynamicVarExtensions.cs" />
+    <Compile Include="../CombatSolverIos.CoreOverrides/**/*.cs" Exclude="../CombatSolverIos.CoreOverrides/**/obj/**;../CombatSolverIos.CoreOverrides/**/bin/**" />
+    <Compile Include="../CombatSolverIos.Runtime/**/*.cs" Exclude="../CombatSolverIos.Runtime/**/obj/**;../CombatSolverIos.Runtime/**/bin/**" />
+    <Compile Include="$(CombatSolverGeneratedDir)/**/*.cs" />
+    <EmbeddedResource Include="$(CombatSolverSourceDir)/src/UI/English.json" LogicalName="CombatSolver.UI.English.json" />
+    <InternalsVisibleTo Include="OfflineSearchHarness" />
+    <!-- Needed to compile retained upstream Godot subclasses. The mobile entry
+         creates built-in Controls; it does not invoke desktop script startup. -->
+    <PackageReference Include="Godot.SourceGenerators" Version="4.5.1" PrivateAssets="all" />
+    <Reference Include="sts2" HintPath="$(CombatSolverGameAssembly)" Private="false" />
+    <Reference Include="GodotSharp" HintPath="$(CombatSolverOriginalGameDir)/GodotSharp.dll" Private="false" />
+    <Reference Include="0Harmony" HintPath="$(CombatSolverOriginalGameDir)/0Harmony.dll" Private="false" />
+    <Reference Include="STS2-RitsuLib" HintPath="$(CombatSolverRitsuDir)/compat/0.111.0/STS2-RitsuLib.dll" Private="false" />
+    <Reference Include="STS2-RitsuLib.Runtime" HintPath="$(CombatSolverRitsuDir)/compat/0.111.0/STS2-RitsuLib.Runtime.dll" Private="false" />
+    <Reference Include="STS2-RitsuLib.Shared" HintPath="$(CombatSolverRitsuDir)/shared/STS2-RitsuLib.Shared.dll" Private="false" />
+    <Reference Include="STS2-RitsuLib.Ui" HintPath="$(CombatSolverRitsuDir)/shared/STS2-RitsuLib.Ui.dll" Private="false" />
+    <Reference Include="STS2-RitsuLib.Settings" HintPath="$(CombatSolverRitsuDir)/shared/STS2-RitsuLib.Settings.dll" Private="false" />
+    <None Include="$(CombatSolverWorkDir)/licenses/**/*" Link="licenses/%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <Target Name="ValidateCombatSolverIosInputs" BeforeTargets="ResolveAssemblyReferences">
+    <Error Condition="!Exists('$(CombatSolverWorkDir)/prepared.json')" Text="Run tools/prepare-combat-solver.py with the pinned source checkouts and copied game/mod inputs first." />
+    <Error Condition="!Exists('$(CombatSolverGameAssembly)')" Text="Missing statically bridged game assembly. Run CombatSolverAot bridge on the copied original beta assembly." />
+    <Error Condition="!Exists('$(CombatSolverGeneratedDir)/CardOnPlayRecipes.g.cs')" Text="Missing static card recipes. Run CombatSolverAot recipes against the original copied beta references." />
+    <Exec Command="python3 &quot;$(MSBuildProjectDirectory)/../../tools/prepare-combat-solver.py&quot; --verify" />
+  </Target>
+</Project>

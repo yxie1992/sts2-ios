@@ -5,35 +5,63 @@
 # 前置: 已用 build-ios.sh + Xcode GUI 完整构建过一次(DerivedData 里有 .app)。
 set -uo pipefail
 
+STAGE_ONLY=0
+case "${1:-}" in
+  --stage-only) STAGE_ONLY=1;;
+  "") ;;
+  *) echo "Usage: $0 [--stage-only]" >&2; exit 1;;
+esac
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 [ -f "$SCRIPT_DIR/config.sh" ] || { echo "❌ 缺少 ios-export/config.sh，先 cp config.example.sh config.sh 并填写" >&2; exit 1; }
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/config.sh"
-: "${STS2_DEVICE_UDID:?config.sh 未设置 STS2_DEVICE_UDID}"
+if [ "$STAGE_ONLY" = "0" ]; then
+  : "${STS2_DEVICE_UDID:?config.sh 未设置 STS2_DEVICE_UDID}"
+fi
 : "${STS2_SIGN_IDENTITY:?config.sh 未设置 STS2_SIGN_IDENTITY}"
 : "${STS2_BUNDLE_ID:?config.sh 未设置 STS2_BUNDLE_ID}"
 
-DEV="$STS2_DEVICE_UDID"
+DEV="${STS2_DEVICE_UDID:-}"
 IDENT="$STS2_SIGN_IDENTITY"
 # 已构建的 .app（DerivedData 里的哈希目录不固定；Xcode Run 默认 Debug，也可能 Release，两者都收，取最新）
-APP=$(find "$HOME/Library/Developer/Xcode/DerivedData" -maxdepth 5 -type d -path "*-iphoneos/StS2.app" 2>/dev/null \
-      | xargs -I{} stat -f '%m %N' {} 2>/dev/null | sort -rn | head -1 | cut -d' ' -f2-)
+APP="${STS2_BASE_APP:-}"
+if [ -z "$APP" ]; then
+  APP=$(find "$HOME/Library/Developer/Xcode/DerivedData" -maxdepth 5 -type d -path "*-iphoneos/StS2.app" 2>/dev/null \
+        | xargs -I{} stat -f '%m %N' {} 2>/dev/null | sort -rn | head -1 | cut -d' ' -f2-)
+fi
 PUB="$SCRIPT_DIR/.godot/mono/temp/bin/ExportRelease/ios-arm64/publish/sts2.dylib"
-STG="$(mktemp -d /tmp/sts2slim.XXXXXX)/StS2.app"
+STAGE_DIR=$(mktemp -d /tmp/sts2slim.XXXXXX) || { echo "❌ 创建临时目录失败" >&2; exit 1; }
+STG="$STAGE_DIR/StS2.app"
 ENT="$SCRIPT_DIR/.work/ent_mem.plist"
 fail(){ echo "❌ $1"; exit 1; }
 
 [ -f "$PUB" ] || fail "新 dylib 不存在: $PUB（先跑 build-ios.sh）"
 [ -n "$APP" ] && [ -d "$APP" ] || fail "DerivedData 里找不到已构建的 StS2.app（先用 Xcode GUI 完整构建一次）"
 [ -f "$ENT" ] || fail "entitlements 不存在: $ENT（先跑 build-ios.sh 生成）"
-# 1) 换新织入 dylib 进 .app
-cp "$PUB" "$APP/Frameworks/sts2.framework/sts2" || fail "换 dylib 失败"
-install_name_tool -id '@rpath/sts2.framework/sts2' "$APP/Frameworks/sts2.framework/sts2" \
+# 1) 先复制基座再换 dylib，保留已验证的原始 .app。
+cp -R "$APP" "$STG" || fail "复制基座失败"
+BASE_BUNDLE=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$STG/Info.plist")
+[ "$BASE_BUNDLE" = "$STS2_BUNDLE_ID" ] || fail "基座 bundle 与 config.sh 不匹配"
+if [ -f "$SCRIPT_DIR/prebuilt/deps/CombatSolver.dll" ]; then
+  PINNED_VERSION=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["game"]["version"])' \
+    "$SCRIPT_DIR/../src/CombatSolverIos/upstream.json") || fail "读取 solver 版本失败"
+  BASE_VERSION=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$STG/Info.plist")
+  [ "$BASE_VERSION" = "$PINNED_VERSION" ] || fail "CombatSolver 需要 $PINNED_VERSION 的新基座（当前 $BASE_VERSION）"
+  for notice in CombatSolver-LICENSE.txt CombatSolver-THIRD_PARTY_NOTICES.md RitsuLib-LICENSE.txt; do
+    [ -s "$SCRIPT_DIR/prebuilt/licenses/$notice" ] || fail "缺少上游许可: $notice"
+  done
+fi
+cp "$PUB" "$STG/Frameworks/sts2.framework/sts2" || fail "换 dylib 失败"
+install_name_tool -id '@rpath/sts2.framework/sts2' "$STG/Frameworks/sts2.framework/sts2" \
   || fail "修正 sts2.framework 动态库标识失败"
 echo "✅ 新 dylib 已换入 ($(shasum "$PUB" | cut -c1-12))"
 # 2) 造瘦身包
-mkdir -p "$(dirname "$STG")"; cp -R "$APP" "$STG"
 rm -f "$STG/StS2.pck"
+if [ -d "$SCRIPT_DIR/prebuilt/licenses" ]; then
+  mkdir -p "$STG/CombatSolver-Licenses" || fail "创建许可目录失败"
+  cp -R "$SCRIPT_DIR/prebuilt/licenses/." "$STG/CombatSolver-Licenses/" || fail "复制许可失败"
+fi
 plutil -remove godot_cmdline "$STG/Info.plist" 2>/dev/null
 plutil -insert godot_cmdline -json '["--main-pack", "user://StS2.pck"]' "$STG/Info.plist" || fail "注入 cmdline 失败"
 echo "✅ 瘦身包 $(du -sh "$STG" | cut -f1), 已注入 --main-pack user://StS2.pck"
@@ -43,7 +71,12 @@ for fw in "$STG/Frameworks/"*.framework; do
 done
 codesign -f -s "$IDENT" --generate-entitlement-der --entitlements "$ENT" "$STG" >/dev/null 2>&1 || fail "签 .app 失败"
 codesign -d --entitlements - "$STG" 2>/dev/null | grep -q increased-memory && echo "✅ 大内存权限已嵌入" || fail "大内存权限缺失"
-codesign -vv "$STG" 2>&1 | grep -q "satisfies its Designated Requirement" && echo "✅ 签名有效"
+codesign --verify --deep --strict "$STG" || fail "签名验证失败"
+echo "✅ 签名有效"
+if [ "$STAGE_ONLY" = "1" ]; then
+  echo "✅ 已签名瘦身包（未装机）: $STG"
+  exit 0
+fi
 # 4) 装机(保留文档区)。⚠️ 必须查真实退出码, 曾有装机失败仍报成功的教训。
 echo "▶ USB 装机(保留 Documents/StS2.pck + 存档)..."
 INSTALL_OUT=$(xcrun devicectl device install app --device "$DEV" "$STG" 2>&1)

@@ -43,6 +43,9 @@ iOS 禁止 JIT，Harmony 之类运行时打补丁的方案不可用。本项目�
 
 底层移植/稳定性补丁（触控、UI 缩放、移动布局、内存、着色器预热、生命周期等）见 [`docs/patch-catalog.md`](docs/patch-catalog.md)。
 
+可选的 CombatSolver 静态集成正在开发中，含触屏设置和离线验证；**尚未完成真机验证**。
+版本约束、构建与验证状态见 [`docs/COMBAT_SOLVER_IOS.md`](docs/COMBAT_SOLVER_IOS.md)。
+
 ## 仓库结构
 
 ```

@@ -35,6 +35,23 @@ step(){ echo; echo "▶ $1"; }
 preserve_export_preset(){
   cp "$EXPORT_DIR/export_presets.cfg" "$WORK/export_presets.saved.cfg" || fail "备份导出预设失败"
   trap 'cp "$WORK/export_presets.saved.cfg" "$EXPORT_DIR/export_presets.cfg"' EXIT
+  if [ "${STS2_ENABLE_COMBAT_SOLVER:-0}" = "1" ]; then
+    python3 - "$EXPORT_DIR/export_presets.cfg" "$ROOT/src/CombatSolverIos/upstream.json" <<'PY' \
+      || fail "Cannot apply pinned solver game version to export preset"
+import json
+from pathlib import Path
+import re
+import sys
+path = Path(sys.argv[1])
+version = json.loads(Path(sys.argv[2]).read_text())["game"]["version"]
+text = path.read_text()
+for key in ("application/short_version", "application/version"):
+    text, count = re.subn(r"^" + re.escape(key) + r"=.*$", key + "=" + json.dumps(version), text, flags=re.MULTILINE)
+    if count != 1:
+        raise ValueError("Expected one export version setting: " + key)
+path.write_text(text)
+PY
+  fi
 }
 restore_export_preset(){
   cp "$WORK/export_presets.saved.cfg" "$EXPORT_DIR/export_presets.cfg" || fail "还原导出预设失败"
@@ -54,17 +71,36 @@ ok "前置齐全"
 
 step "1/6 重新织入最新 sts2.dll（补丁 + 游戏原始程序集）"
 cd "$ROOT" || fail "cd 失败"
+if [ "${STS2_ENABLE_COMBAT_SOLVER:-0}" = "1" ]; then
+  bash "$SCRIPT_DIR/prepare-combat-solver.sh" >"$WORK/solver-prepare.log" 2>&1 \
+    || fail "CombatSolver preparation failed; see $WORK/solver-prepare.log"
+  # All subsequent references, native dependencies and assets use this pinned
+  # copy. Never re-read a live Steam installation after snapshot validation.
+  GAME="$WORK/solver-inputs/game"
+  GAME_DATA="$GAME/data_sts2_macos_arm64"
+fi
 # 补丁项目从被忽略的 game-refs/ 引用用户当前游戏程序集；首次克隆也需自动备齐。
 mkdir -p "$ROOT/game-refs" || fail "创建 game-refs 失败"
 cp "$GAME_DATA/sts2.dll" "$GAME_DATA/GodotSharp.dll" "$ROOT/game-refs/" \
   || fail "拷贝游戏编译引用失败"
 dotnet build src/STS2MobileIos -c Release -o "$WORK/mobilepatch-out" >"$WORK/patch-build.log" 2>&1 \
   || fail "补丁库编译失败，见 $WORK/patch-build.log"
+WEAVE_INPUT="$GAME_DATA/sts2.dll"
+if [ "${STS2_ENABLE_COMBAT_SOLVER:-0}" = "1" ]; then
+  WEAVE_INPUT="$WORK/solver-inputs/rewritten/sts2.dll"
+fi
 # Weaver 只读原始程序集，以便在同目录解析 Sentry 等依赖；织入产物始终写入 .work/。
 dotnet run --project src/STS2Weaver -c Release -- \
-  "$GAME_DATA/sts2.dll" "$WORK/mobilepatch-out/STS2MobileIos.dll" \
+  "$WEAVE_INPUT" "$WORK/mobilepatch-out/STS2MobileIos.dll" \
   src/STS2MobileIos/manifest.json "$WOVEN" 2>&1 | tee "$WORK/weave.log" | grep -E "\[FAIL\]|完成"
 grep -q "完成" "$WORK/weave.log" || fail "织入失败，见 $WORK/weave.log"
+if [ "${STS2_ENABLE_COMBAT_SOLVER:-0}" = "1" ]; then
+  dotnet run --project src/STS2Weaver -c Release -- \
+    "$WOVEN" "$WORK/solver-inputs/rewritten/CombatSolver.dll" \
+    src/CombatSolverIos.Runtime/manifest.json "$WORK/sts2-solver-woven.dll" \
+    >"$WORK/solver-weave.log" 2>&1 || fail "Solver hooks failed; see $WORK/solver-weave.log"
+  mv "$WORK/sts2-solver-woven.dll" "$WOVEN" || fail "Cannot stage solver-woven game"
+fi
 ok "织入完成: $WOVEN"
 
 step "2/6 组装 prebuilt/（织入主程序集 + 全部托管依赖）"
@@ -83,6 +119,14 @@ for dll in "$GAME_DATA"/*.dll; do
   [ -f "$SHARED_FW/$base" ] && continue   # 框架自带，跳过
   cp "$dll" "$PREBUILT/deps/$base"
 done
+if [ "${STS2_ENABLE_COMBAT_SOLVER:-0}" = "1" ]; then
+  cp "$WORK/solver-inputs/rewritten/CombatSolver.dll" "$PREBUILT/deps/" || fail "Cannot stage solver"
+  for dll in compat/0.111.0/STS2-RitsuLib.dll compat/0.111.0/STS2-RitsuLib.Runtime.dll \
+    shared/STS2-RitsuLib.Shared.dll shared/STS2-RitsuLib.Ui.dll shared/STS2-RitsuLib.Settings.dll; do
+    cp "$WORK/solver-inputs/ritsu/$dll" "$PREBUILT/deps/" || fail "Cannot stage Ritsu dependency: $dll"
+  done
+  cp -R "$WORK/solver-inputs/licenses" "$PREBUILT/" || fail "Cannot retain upstream notices"
+fi
 DEPCOUNT=$(ls "$PREBUILT/deps" | wc -l | tr -d ' ')
 ok "依赖组装完成: $DEPCOUNT 个第三方托管程序集（按框架清单精确滤除）"
 echo "  保留: $(ls "$PREBUILT/deps" | tr '\n' ' ')"
@@ -185,6 +229,11 @@ restore_export_preset
 [ "$EXPORT_RC" = "0" ] || fail "Godot 导出失败(退出码 $EXPORT_RC)，见 $WORK/export.log"
 [ -d "$EXPORT_DIR/build/StS2.xcodeproj" ] || fail "Godot 未生成 Xcode 工程，见 $WORK/export.log"
 ok "Xcode 工程已生成"
+if [ "${STS2_ENABLE_COMBAT_SOLVER:-0}" = "1" ]; then
+  mkdir -p "$EXPORT_DIR/build/CombatSolver-Licenses" || fail "Cannot create license directory"
+  cp -R "$WORK/solver-inputs/licenses/." "$EXPORT_DIR/build/CombatSolver-Licenses/" \
+    || fail "Cannot retain solver license notices"
+fi
 
 step "5.15/6 修 pbxproj 签名（Godot 每次导出重生成工程: Distribution→Development + 钉死团队）"
 PBX="$EXPORT_DIR/build/StS2.xcodeproj/project.pbxproj"

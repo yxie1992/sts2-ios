@@ -3,8 +3,8 @@
 
 Three in-place edits (all offsets of untouched file data preserved):
   1. .godot/extension_list.cfg  -> drop the sentry.gdextension line (shrinks)
-  2. project.binary             -> rename autoload key 'autoload/SentryInit'
-                                    to 'xutoload/SentryInit' (same length) so
+  2. project.binary             -> neutralize the known SentryInit or
+                                    SentryBootstrap autoload key (same length) so
                                     Godot no longer runs the Sentry autoload,
                                     which would call the (now absent) native API.
   3. directory                  -> remove the addons/sentry/sentry.gdextension
@@ -17,6 +17,32 @@ Usage: pck_patch_sentry.py <src.pck> <dst.pck>
 import struct, sys, os, shutil, hashlib
 
 def u32(b, o): return struct.unpack_from("<I", b, o)[0]
+
+def disable_sentry_autoload(data):
+    """Parse ECFG record boundaries, so a value cannot be mistaken for a key."""
+    assert data[:4] == b"ECFG" and len(data) >= 8, "bad project.binary header"
+    result = bytearray(data)
+    offset = 8
+    disabled = []
+    for _ in range(u32(data, 4)):
+        assert offset + 4 <= len(data), "truncated project setting"
+        length = u32(data, offset); offset += 4
+        key_start = offset
+        assert offset + length + 4 <= len(data), "truncated project key"
+        key = bytes(data[offset:offset + length]).decode("utf-8")
+        offset += length
+        value_length = u32(data, offset); offset += 4
+        assert offset + value_length <= len(data), "truncated project value"
+        value = data[offset:offset + value_length]
+        offset += value_length
+        if key in {"autoload/SentryInit", "autoload/SentryBootstrap"}:
+            result[key_start] = ord("x")
+            disabled.append(key)
+        elif key.startswith("autoload/") and ("sentry" in key.lower() or b"addons/sentry/" in value):
+            raise AssertionError(f"Unknown Sentry autoload requires review: {key}")
+    assert offset == len(data), "unexpected trailing project.binary data"
+    assert disabled, "known Sentry autoload key not found in project.binary"
+    return result, disabled
 
 def patch(src, dst):
     shutil.copyfile(src, dst)
@@ -75,16 +101,13 @@ def patch(src, dst):
     ext[3] = len(new); ext[4] = hashlib.md5(new).digest()
     print(f"extension_list.cfg: {sz} -> {len(new)} bytes")
 
-    # 2. project.binary: neutralize the SentryInit autoload key (same length)
+    # 2. project.binary: neutralize the version-specific autoload key.
     po = abs_off(proj[2]); psz = proj[3]
     f.seek(po); pdata = bytearray(f.read(psz))
-    k = pdata.find(b"autoload/SentryInit")
-    assert k >= 0, "autoload/SentryInit key not found in project.binary"
-    pdata[k:k + 8] = b"xutoload"          # 'autoload' -> 'xutoload'
-    assert pdata.find(b"autoload/SentryInit") == -1
+    pdata, disabled = disable_sentry_autoload(pdata)
     f.seek(po); f.write(pdata)
     proj[4] = hashlib.md5(bytes(pdata)).digest()
-    print(f"project.binary: disabled autoload/SentryInit (same-length rename)")
+    print(f"project.binary: disabled {', '.join(disabled)} (same-length rename)")
 
     # 3. remove sentry.gdextension entry, rewrite directory, truncate
     del entries[sentry_idx]

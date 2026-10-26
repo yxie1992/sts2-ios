@@ -1,0 +1,19 @@
+{
+  "combatSolver": {
+    "url": "https://github.com/Torch1230/CombatSolver",
+    "commit": "5c773caaec742bc55588bc9ee21c361326a732f0",
+    "version": "0.50.1",
+    "license": "MIT"
+  },
+  "ritsuLib": {
+    "url": "https://github.com/BAKAOLC/STS2-RitsuLib",
+    "commit": "772f280964f2efc7c7e2f29fc59844e68616dd57",
+    "version": "0.6.10",
+    "license": "MIT"
+  },
+  "game": {
+    "version": "0.111.0",
+    "sha256": "9cb4f1ad8c9f284aa8fec3122ffd6d780bbf543d875c817abdd12ff63fbf12b4",
+    "pckSha256": "b3c9f133143f98a1c329c3d2efc7d8a9feb395db46fd3965b899487bf1f4d106"
+  }
+}
